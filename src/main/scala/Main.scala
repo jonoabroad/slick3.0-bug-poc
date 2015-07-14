@@ -1,67 +1,58 @@
 import slick.driver.PostgresDriver.api._
 
-case class User(
-  id:    Option[Int],
-  email: String
-)
+case class PK[A](value: Long) extends AnyVal with MappedTo[Long]
+
+case class User(email: String,id:Option[PK[UserTable]] = None)
 
 class UserTable(tag: Tag) extends Table[User](tag, "users") {
-  def id = column[Int]("email")
+  def id    = column[PK[UserTable]]("id")
   def email = column[String]("email")
 
-  def * = (id.?, email) <> ((User.apply _).tupled, User.unapply)
+  def * = (email,id.?) <> ((User.apply _).tupled, User.unapply)
 }
 
-case class RoleUser(
-  roleId: Int,
-  userId: Int
-)
+case class RoleUser(roleId: PK[RoleTable],userId: PK[UserTable])
 
 class RoleUserTable(tag: Tag) extends Table[RoleUser](tag, "roles_users") {
-  def roleId = column[Int]("role_id")
-  def userId = column[Int]("user_id")
+  def roleId = column[PK[RoleTable]]("role_id")
+  def userId = column[PK[UserTable]]("user_id")
 
   def * = (roleId, userId) <> ((RoleUser.apply _).tupled, RoleUser.unapply)
 }
 
-case class Role(
-  id:   Option[Int],
-  name: String
-)
+case class Role(name: String,id:   Option[PK[RoleTable]] = None)
 
 class RoleTable(tag: Tag) extends Table[Role](tag, "roles") {
-  def id = column[Int]("id")
+  def id = column[PK[RoleTable]]("id")
   def name = column[String]("name")
 
-  def * = (id.?, name) <> ((Role.apply _).tupled, Role.unapply)
+  def * = (name,id.?) <> ((Role.apply _).tupled, Role.unapply)
 }
 
-object Main extends App {
-  val db = Database.forURL(url = "", prop = Map.empty[String, String])
+object Main  {
 
-  val userTable = TableQuery[UserTable]
-  val roleTable = TableQuery[RoleTable]
-  val roleUserTable = TableQuery[RoleUserTable]
+    val db            = Database.forURL(url = "", prop = Map.empty[String, String])
+    val userTable     = TableQuery[UserTable]
+    val roleTable     = TableQuery[RoleTable]
+    val roleUserTable = TableQuery[RoleUserTable]
 
-  val id = 1
+  def main(args:Array[String]):Unit = {
 
-  // What I expect in production env and models:
-  //   select users.*, array_agg_custom(roles.rights) as rights
-  //   from users
-  //   left join roles_users on roles_users.user_id = users.id
-  //   left join roles on roles_users.role_id = roles.id
-  //   group by users.id
 
-  db.run {
-    (for {
-      t <- userTable
-        .filter(_.id === id)
-        .take(1)
-        .joinLeft(roleUserTable).on(_.id === _.userId)
-        .joinLeft(roleTable.map { t =>
-          (t.id, t.name) // arrayAggCustom(t.rights)
-        }).on(_._2.map(_.roleId) === _._1)
-        .groupBy(g => (g._1._1, g._2.map(_._2)))
-    } yield t._1).result.headOption
+  val id = PK[UserTable](1)
+  
+  val query =  userTable
+    .filter(_.id === id)
+    .take(1)    
+    .joinLeft(roleUserTable).on(_.id === _.userId)
+    .joinLeft(roleTable).on { case ((ut,orut),rt) => rt.id === orut.map(_.roleId) }
+    .groupBy{case ((ut,orut),ort) => (ut.id,ort.map(_.name))}
+    .map { case (k, g) => k }
+
+    println(query.result.statements.mkString)
+    val action = query.result
+    db.run { action.headOption }
+
   }
+
 }
